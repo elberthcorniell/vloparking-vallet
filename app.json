@@ -1,10 +1,13 @@
 {
-  "name": "vloparking",
-  "displayName": "vloparking",
+  "name": "Vlovalet",
+  "displayName": "Vlovalet",
   "expo": {
-    "name": "vloparking",
-    "slug": "vloparking",
-    "version": "1.0.0",
+    "name": "Vlovalet",
+    "slug": "Vlovalet",
+    "version": "1.0.0",/*
+    "packageOpts":{
+      "port": 8787
+    },*/
     "platforms": [
       "ios",
       "android",
