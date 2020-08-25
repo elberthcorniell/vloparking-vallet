@@ -21,7 +21,7 @@ export default class Login extends React.Component {
         password_err: '',
         username_err: ''
     }
-    Login() {
+    Login() {   
         fetch(`${API_HOST}/api/validate/login/valet`, {
             method: 'POST',
             headers: {

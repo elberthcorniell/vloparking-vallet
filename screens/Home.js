@@ -7,7 +7,8 @@ import {
     Image,
     StatusBar,
     ScrollView,
-    Animated
+    Animated,
+    Alert
 } from 'react-native';
 import { styles } from '../style/styles'
 import { AntDesign } from '@expo/vector-icons'
@@ -19,12 +20,13 @@ import Maps from './Maps'
 import io from 'socket.io-client'
 import * as Location from 'expo-location';
 import * as TaskManager from 'expo-task-manager'
+import { call } from 'react-native-reanimated';
 const screenHeight = Dimensions.get("window").height;
 const screenWidth = Dimensions.get("window").width;
 let socket
 export default class Home extends React.Component {
     state = {
-        userMap: [
+        valetTrips: [
             { text: 'LINK', description: 'Chainlink', icon: <Image source={{ uri: 'https://inverte.io/assets/images/LINK.png' }} style={{ height: 35, width: 35 }} />, margin: 40 },
         ],
         scrollPosition: { x: 0, y: 0 },
@@ -33,31 +35,33 @@ export default class Home extends React.Component {
         location: {
             longitude: -19,
             latitude: 70
-        }
+        },
+        tripIds: [],
+        availableParks: [1, 2, 3, 4, 5, 6]
     }
 
     componentDidMount() {
-        this.verifyAuth()
+        this.verifyAuth(() => { this.getValetTrips() })
         socket = io(`${API_HOST}/`)
         socket.on('tripStarted', data => {
             let { status } = data
             if (status) {
-                console.log('Trip Started')
                 this.setState({
                     modalState: false,
                     locationModal: true
                 }, () => {
                     Location.startLocationUpdatesAsync('valetTrip', {
                         accuracy: Location.Accuracy.High,
-                        timeInterval: 500
+                        timeInterval: 1000,
+                        distanceInterval: 2
                     }).then(() => {
                         TaskManager.defineTask('valetTrip', ({ data: { locations }, e }) => {
                             if (e) {
-                                console.log(e.message)
                                 return;
                             }
                             let { latitude, longitude, speed } = locations[0].coords
                             socket.emit('valetLocation', {
+                                tripIds: this.state.tripIds,
                                 latitude,
                                 longitude,
                                 valetId: this.state.valetId,
@@ -80,6 +84,48 @@ export default class Home extends React.Component {
             location: status == 'granted'
         })
     }
+    getParkingAvailable() {
+        SecureStore.getItemAsync('authtoken').then((token) => {
+            fetch(`${API_HOST}/api/admin/parking/${this.state.businessId}`, {
+                headers: {
+                    'Accept': 'application/json',
+                    'Content-Type': 'application/json',
+                    'authorization': token
+                }
+            })
+                .then(res => res.json())
+                .then(data => {
+                    let { success, availableParks } = data
+                    if (success) {
+                        this.setState({
+                            availableParks
+                        })
+                    }
+                })
+        })
+    }
+    getValetTrips() {
+        SecureStore.getItemAsync('authtoken').then((token) => {
+            fetch(`${API_HOST}/api/admin/trips/valet/${this.state.valetId}`, {
+                headers: {
+                    'Accept': 'application/json',
+                    'Content-Type': 'application/json',
+                    'authorization': token
+                }
+            })
+                .then(res => res.json())
+                .then(data => {
+                    let { success, valetTrips } = data
+                    if (success) {
+                        let tripIds = Array.from(valetTrips, x => x.dateEnd ? undefined : x.tripId)
+                        this.setState({
+                            valetTrips,
+                            tripIds
+                        })
+                    }
+                })
+        })
+    }
     createTrip(tripObject) {
         tripObject = JSON.parse(tripObject)
         tripObject = {
@@ -87,9 +133,9 @@ export default class Home extends React.Component {
             valetId: this.state.valetId,
             businessId: this.state.businessId
         }
-            this.setState({
-                tripIp: tripObject.tripId
-            })
+        this.setState({
+            tripId: tripObject.tripId
+        })
         socket.emit('createTrip', tripObject, console.log)
     }
     updateState(index) {
@@ -97,7 +143,7 @@ export default class Home extends React.Component {
         card[index].status = !card[index].status
         this.setState({ card })
     }
-    verifyAuth() {
+    verifyAuth(callback) {
         SecureStore.getItemAsync('authtoken').then((token) => {
             fetch(`${API_HOST}/api/validate/`, {
                 headers: {
@@ -108,13 +154,37 @@ export default class Home extends React.Component {
             })
                 .then(res => res.json())
                 .then(data => {
-                    console.log(data)
-                    this.setState(data)
+                    this.setState(data, () => {
+                        if (callback)
+                            callback()
+                    })
                     if (!data.success) {
                         this.props.navigation.replace('Login')
                     }
                 })
         })
+    }
+    setAsParked(parkId) {
+        Alert.alert(
+            'Hey!',
+            'Do you want to set this car as parked here?',
+            [
+                {
+                    text: 'Cancel',
+                    onPress: () => {
+                    },
+                    style: 'cancel',
+                },
+                {
+                    text: 'Yes', onPress: () => {
+                        socket.emit("setAsParked", {
+                            parkId,
+                            tripId: this.state.tripId
+                        }, console.log)
+                    }
+                },
+            ]
+        )
     }
     render() {
         return (
@@ -267,8 +337,42 @@ export default class Home extends React.Component {
                             marginTop: this.state.scrollPosition.y > 95 ? 95 : this.state.scrollPosition.y
                         }}>
                         <View style={{ marginTop: 20, width: screenWidth, alignItems: 'center' }}>
-                            {this.state.userMap.map(info => {
-                                return (<SettingButton {...info} />)
+                            {this.state.valetTrips.map(info => {
+                                return <SettingButton
+                                    text={info.username}
+                                    description={info.dateStart}
+                                    onPress={() => {
+                                        info.dateEnd == null && this.setState({
+                                            tripId: info.tripId,
+                                            locationModal: true
+                                        }, () => {
+                                            this.getParkingAvailable()
+                                        })
+                                    }}
+                                    icon={
+                                        info.dateEnd ?
+                                            <View style={{
+                                                backgroundColor: 'lightgreen',
+                                                height: 40, width: 40,
+                                                justifyContent: "center",
+                                                alignItems: 'center',
+                                                borderRadius: 20,
+                                            }}><Text style={{
+                                                color: 'white',
+                                                fontWeight: "bold"
+                                            }}>Done</Text></View> :
+                                            <View style={{
+                                                backgroundColor: '#FF4040',
+                                                height: 40, width: 40,
+                                                justifyContent: "center",
+                                                alignItems: 'center',
+                                                borderRadius: 20,
+                                            }}><Text style={{
+                                                color: 'white',
+                                                fontWeight: "bold"
+                                            }}>Live</Text></View>
+                                    }
+                                />
                             })}
                         </View>
                     </ScrollView>
@@ -286,10 +390,11 @@ export default class Home extends React.Component {
                         createTrip={e => this.createTrip(e)}
                         modalState={this.state.locationModal}
                         closeModal={() => { this.setState({ locationModal: false }) }}
-                        location={this.state.location}
+                        availableParks={this.state.availableParks}
+                        setAsParked={e => this.setAsParked(e)}
                     />
                 </ScrollView>
-            </View>
+            </View >
         );
     }
 }

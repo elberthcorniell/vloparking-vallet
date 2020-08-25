@@ -30,10 +30,10 @@ export default class QRScreen extends React.Component {
   }
   componentDidMount() {
     BarCodeScanner.getPermissionsAsync()
-    .then(status=>{
-      if(status=='granted')
-        console.log('kevi')
-    })
+      .then(status => {
+        if (status == 'granted')
+          console.log('kevi')
+      })
   }
   handleSteps = ({ qrType, data }) => {
     try {
@@ -63,10 +63,10 @@ export default class QRScreen extends React.Component {
           })
             .then(res => res.json())
             .then(data => {
-              let { success } = data
+              let { success, msg } = data
               Alert.alert(
                 'Hey!',
-                success ? `Do you want to add ${deviceId} as ${this.state.index == 0 ? "car" : "key"} Card` : 'Invalid Card!',
+                success ? `Do you want to add ${deviceId} as ${this.state.index == 0 ? "car" : "key"} Card` : msg ? msg : 'Invalid Card!',
                 success ? [
                   {
                     text: 'Cancel',
