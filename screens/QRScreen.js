@@ -156,9 +156,7 @@ export default class QRScreen extends React.Component {
                   })
                   if (success)
                     this.props.createTrip(qrData)
-                  this.props.askForLocationPermissions(status => {
-                    console.log(status)
-                  })
+                  this.props.askForLocationPermissions().then(console.log)
                 })
             })
           }) : ''

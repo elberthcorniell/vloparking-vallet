@@ -4,10 +4,7 @@
   "expo": {
     "name": "Vlovalet",
     "slug": "Vlovalet",
-    "version": "1.0.0",/*
-    "packageOpts":{
-      "port": 8787
-    },*/
+    "version": "1.0.0",
     "platforms": [
       "ios",
       "android",
@@ -15,6 +12,12 @@
     ],
     "assetBundlePatterns": [
       "**/*"
-    ]
+    ],
+    "android": {
+      "googleServicesFile": "./google-services.json"
+    }
+  },
+  "android": {
+    "googleServicesFile": "./google-services.json"
   }
 }

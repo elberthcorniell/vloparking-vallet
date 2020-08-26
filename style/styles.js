@@ -90,8 +90,8 @@ const styles = StyleSheet.create({
     backgroundColor: 'white',
     width: screenWidth,
     alignItems: 'center',
-    borderTopLeftRadius: 40,
-    borderTopRightRadius: 40,
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
     elevation: 20
   },
   buttonBlueText: {

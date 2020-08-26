@@ -134,9 +134,9 @@ export default class Login extends React.Component {
                                 <Text style={styles.buttonBlueText}>Login</Text>
                             </View>
                         </TouchableOpacity>
-                        <TouchableOpacity onPress={() => { this.props.navigation.navigate('Register') }}>
-                            <Text>Don't have an account? Register now!</Text>
-                        </TouchableOpacity>
+                        <View style={{padding: 20, textAlign: 'center'}}>
+                            <Text>This is the Valet App i you are a user please download Client App</Text>
+                            </View>
                     </View>
                 </View>
             </SafeAreaView>

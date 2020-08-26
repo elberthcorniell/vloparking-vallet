@@ -8,11 +8,13 @@ import {
     StatusBar,
     ScrollView,
     Animated,
-    Alert
+    Alert,
+    RefreshControl
 } from 'react-native';
 import { styles } from '../style/styles'
 import { AntDesign } from '@expo/vector-icons'
 import * as  SecureStore from "expo-secure-store";
+import Constants from 'expo-constants';
 import { API_HOST } from '../config'
 import SettingButton from '../components/settingButton'
 import QRScreen from './QRScreen'
@@ -20,15 +22,16 @@ import Maps from './Maps'
 import io from 'socket.io-client'
 import * as Location from 'expo-location';
 import * as TaskManager from 'expo-task-manager'
+import * as Permissions from 'expo-permissions'
+import * as Notifications from 'expo-notifications'
 import { call } from 'react-native-reanimated';
 const screenHeight = Dimensions.get("window").height;
 const screenWidth = Dimensions.get("window").width;
 let socket
+let headers
 export default class Home extends React.Component {
     state = {
-        valetTrips: [
-            { text: 'LINK', description: 'Chainlink', icon: <Image source={{ uri: 'https://inverte.io/assets/images/LINK.png' }} style={{ height: 35, width: 35 }} />, margin: 40 },
-        ],
+        valetTrips: [],
         scrollPosition: { x: 0, y: 0 },
         scrollY: new Animated.Value(0),
         modalState: false,
@@ -37,11 +40,38 @@ export default class Home extends React.Component {
             latitude: 70
         },
         tripIds: [],
-        availableParks: [1, 2, 3, 4, 5, 6]
+        availableParks: [1, 2, 3, 4, 5, 6],
+        isAsked: false,
+        events: []
     }
-
     componentDidMount() {
-        this.verifyAuth(() => { this.getValetTrips() })
+        SecureStore.getItemAsync('authtoken').then(token => {
+            headers = {
+                'Accept': 'application/json',
+                'Content-Type': 'application/json',
+                'authorization': token
+            }
+        })
+        this.verifyAuth(() => {
+            this.getValetTrips()
+            SecureStore.getItemAsync('pushToken').then(token => {
+                if (!token || token == '') {
+                    this.registerForPushNotificationsAsync().then(pushToken => {
+                        SecureStore.setItemAsync('pushToken', pushToken)
+                        SecureStore.getItemAsync('authtoken').then(token => {
+                            fetch(`${API_HOST}/api/admin/pushToken`, {
+                                method: 'POST',
+                                headers,
+                                body: JSON.stringify({
+                                    pushToken,
+                                    valetId: this.state.valetId
+                                })
+                            })
+                        })
+                    })
+                }
+            })
+        })
         socket = io(`${API_HOST}/`)
         socket.on('tripStarted', data => {
             let { status } = data
@@ -50,49 +80,52 @@ export default class Home extends React.Component {
                     modalState: false,
                     locationModal: true
                 }, () => {
-                    Location.startLocationUpdatesAsync('valetTrip', {
-                        accuracy: Location.Accuracy.High,
-                        timeInterval: 1000,
-                        distanceInterval: 2
-                    }).then(() => {
-                        TaskManager.defineTask('valetTrip', ({ data: { locations }, e }) => {
-                            if (e) {
-                                return;
-                            }
-                            let { latitude, longitude, speed } = locations[0].coords
-                            socket.emit('valetLocation', {
-                                tripIds: this.state.tripIds,
-                                latitude,
-                                longitude,
-                                valetId: this.state.valetId,
-                                speed
-                            })
-                            this.setState({
-                                location: locations[0].coords
-                            })
-                        })
-                    })
+                    this.getValetTrips()
+                    this.startReporting()
+                    this.getIsAsked()
+                    this.getEvents()
                 })
             }
-            //Open map modal and subscribe location
+        })
+        this.setState({
+            refreshing: false
         })
     }
-    askForLocationPermissions = async (callback) => {
+    startReporting() {
+        Location.startLocationUpdatesAsync('valetTrip', {
+            accuracy: Location.Accuracy.Low,
+            timeInterval: 1000,
+            distanceInterval: 2
+        }).then(() => {
+            TaskManager.defineTask('valetTrip', ({ data: { locations }, e }) => {
+                if (e) {
+                    console.log(e)
+                    return;
+                }
+                let { latitude, longitude, speed } = locations[0].coords
+                socket.emit('valetLocation', {
+                    tripIds: this.state.tripIds,
+                    latitude,
+                    longitude,
+                    valetId: this.state.valetId,
+                    speed
+                })
+                this.setState({
+                    location: locations[0].coords
+                })
+            })
+        })
+    }
+    askForLocationPermissions = async () => {
         let { status } = await Location.requestPermissionsAsync();
-        callback(status == 'granted')
+        return (status == 'granted')
         this.setState({
             location: status == 'granted'
         })
     }
     getParkingAvailable() {
         SecureStore.getItemAsync('authtoken').then((token) => {
-            fetch(`${API_HOST}/api/admin/parking/${this.state.businessId}`, {
-                headers: {
-                    'Accept': 'application/json',
-                    'Content-Type': 'application/json',
-                    'authorization': token
-                }
-            })
+            fetch(`${API_HOST}/api/admin/parking/${this.state.businessId}`, { headers })
                 .then(res => res.json())
                 .then(data => {
                     let { success, availableParks } = data
@@ -106,13 +139,7 @@ export default class Home extends React.Component {
     }
     getValetTrips() {
         SecureStore.getItemAsync('authtoken').then((token) => {
-            fetch(`${API_HOST}/api/admin/trips/valet/${this.state.valetId}`, {
-                headers: {
-                    'Accept': 'application/json',
-                    'Content-Type': 'application/json',
-                    'authorization': token
-                }
-            })
+            fetch(`${API_HOST}/api/admin/trips/valet/${this.state.valetId}`, { headers })
                 .then(res => res.json())
                 .then(data => {
                     let { success, valetTrips } = data
@@ -122,6 +149,12 @@ export default class Home extends React.Component {
                             valetTrips,
                             tripIds
                         })
+                        for (let i = 0; i < tripIds.length; i++) {
+                            if (tripIds[i]) {
+                                this.startReporting()
+                                break
+                            }
+                        }
                     }
                 })
         })
@@ -145,13 +178,7 @@ export default class Home extends React.Component {
     }
     verifyAuth(callback) {
         SecureStore.getItemAsync('authtoken').then((token) => {
-            fetch(`${API_HOST}/api/validate/`, {
-                headers: {
-                    'Accept': 'application/json',
-                    'Content-Type': 'application/json',
-                    'authorization': token
-                }
-            })
+            fetch(`${API_HOST}/api/validate/`, { headers })
                 .then(res => res.json())
                 .then(data => {
                     this.setState(data, () => {
@@ -177,14 +204,98 @@ export default class Home extends React.Component {
                 },
                 {
                     text: 'Yes', onPress: () => {
+                        let { tripId, valetId } = this.state
                         socket.emit("setAsParked", {
                             parkId,
-                            tripId: this.state.tripId
-                        }, console.log)
+                            tripId,
+                            valetId
+                        }, data => {
+                            let { success, msg } = data
+                            if (data == "OK")
+                                this.getParkingAvailable()
+                            Alert.alert('Hey!', msg || data, [
+                                {
+                                    text: 'Ok',
+                                    onPress: () => {
+                                    },
+                                    style: 'cancel',
+                                },
+                            ])
+                        })
                     }
                 },
             ]
         )
+    }
+    getEvents() {
+        SecureStore.getItemAsync('authtoken').then(token => {
+            fetch(`${API_HOST}/api/admin/events/${this.state.tripId}`, {headers})
+            .then(res => res.json())
+            .then(data=>{
+                let {success, events} = data
+                this.setState({
+                    events: events || []
+                })
+            })
+        })
+    }
+    registerForPushNotificationsAsync = async () => {
+        let token;
+        if (Constants.isDevice) {
+            const { status: existingStatus } = await Permissions.getAsync(Permissions.NOTIFICATIONS);
+            let finalStatus = existingStatus;
+            if (existingStatus !== 'granted') {
+                const { status } = await Permissions.askAsync(Permissions.NOTIFICATIONS);
+                finalStatus = status;
+            }
+            if (finalStatus !== 'granted') {
+                alert('Failed to get push token for push notification!');
+                return;
+            }
+            token = (await Notifications.getExpoPushTokenAsync()).data;
+        } else {
+            alert('Must use physical device for Push Notifications');
+        }
+
+        if (Platform.OS === 'android') {
+            Notifications.setNotificationChannelAsync('default', {
+                name: 'default',
+                importance: Notifications.AndroidImportance.MAX,
+                vibrationPattern: [0, 250, 250, 250],
+                lightColor: '#FF231F7C',
+            });
+        }
+
+        return token;
+    }
+    getIsAsked() {
+        socket.emit('isAsked', { tripId: this.state.tripId }, isAsked => {
+            console.log(isAsked)
+            this.setState({
+                isAsked
+            })
+        })
+    }
+    carWithOwner() {
+        socket.emit('carWithOwner', {
+            tripId: this.state.tripId
+        }, data => {
+            if (data == "OK") {
+                this.getValetTrips();
+                this.setState({
+                    locationModal: false
+                })
+            } else {
+                Alert.alert('Error!', 'User needs to aks for the car first', [
+                    {
+                        text: 'Ok',
+                        onPress: () => {
+                        },
+                        style: 'cancel',
+                    },
+                ])
+            }
+        })
     }
     render() {
         return (
@@ -195,206 +306,220 @@ export default class Home extends React.Component {
                         scrollPosition: data.nativeEvent.contentOffset
                     })
                 }}
-                    stickyHeaderIndices={[0, 2]}
+                    stickyHeaderIndices={[0]}
                 >
-                    <View>
-                        <View
-                            style={{
-                                width: screenWidth,
-                                alignItems: 'center',
-                                marginTop: -this.state.scrollPosition.y < -95 ? -95 : -this.state.scrollPosition.y,
-                                opacity: 1 - this.state.scrollPosition.y / 95
-                            }}
-                        >
-                            <Text style={styles.blueTitle}>History</Text>
-                            <TouchableOpacity
-                                style={{
-                                    backgroundColor: '#f3f5f7',
-                                    width: 40,
-                                    height: 40,
-                                    justifyContent: 'center',
-                                    alignItems: 'center',
-                                    borderRadius: 20,
-                                    position: 'absolute',
-                                    right: 120,
-                                    top: 30
-                                }}
-                                onPress={() => { this.props.navigation.navigate('Account') }}>
-                                <AntDesign name={'bells'} size={14} color='back' size={20} />
-                            </TouchableOpacity>
-                            <TouchableOpacity
-                                style={{
-                                    backgroundColor: '#f3f5f7',
-                                    width: 40,
-                                    height: 40,
-                                    justifyContent: 'center',
-                                    alignItems: 'center',
-                                    borderRadius: 20,
-                                    position: 'absolute',
-                                    right: 70,
-                                    top: 30
-                                }}
-                                onPress={() => { this.setState({ modalState: true }) }}>
-                                <AntDesign name={'qrcode'} size={14} color='back' size={20} />
-                            </TouchableOpacity>
-                            <TouchableOpacity
-                                style={{
-                                    backgroundColor: '#f3f5f7',
-                                    width: 40,
-                                    height: 40,
-                                    justifyContent: 'center',
-                                    alignItems: 'center',
-                                    borderRadius: 20,
-                                    position: 'absolute',
-                                    right: 20,
-                                    top: 30
-                                }}
-                                onPress={() => { this.props.navigation.navigate('Account') }}>
-                                <AntDesign name={'user'} size={14} color='back' size={20} />
-                            </TouchableOpacity>
-                        </View>
-                        <View
-                            style={{
-                                width: screenWidth,
-                                borderRadius: 5,
-                                alignItems: 'center',
-                            }}
-                        >
+                    <RefreshControl
+                        refreshing={this.state.refreshing}
+                        onRefresh={() => { this.componentDidMount() }}
+                    >
+                        <View>
                             <View
                                 style={{
-                                    width: screenWidth - (((this.state.scrollPosition.y / 80) > 1 ? 0 : 1 - (this.state.scrollPosition.y / 80)) * 20),
-                                    height: 130 + (((this.state.scrollPosition.y / 80) > 1 ? 1 : (this.state.scrollPosition.y / 80)) * 10),
-                                    backgroundColor: '#ff4040',
-                                    marginBottom: -80,
-                                    borderTopLeftRadius: 5,
-                                    borderTopRightRadius: 5
+                                    width: screenWidth,
+                                    alignItems: 'center',
+                                    marginTop: -this.state.scrollPosition.y < -95 ? -95 : -this.state.scrollPosition.y,
+                                    opacity: 1 - this.state.scrollPosition.y / 95
                                 }}
                             >
+                                <Text style={styles.blueTitle}>History</Text>
+                                <TouchableOpacity
+                                    style={{
+                                        backgroundColor: '#f3f5f7',
+                                        width: 40,
+                                        height: 40,
+                                        justifyContent: 'center',
+                                        alignItems: 'center',
+                                        borderRadius: 20,
+                                        position: 'absolute',
+                                        right: 120,
+                                        top: 30
+                                    }}
+                                    onPress={() => { this.props.navigation.navigate('Account') }}>
+                                    <AntDesign name={'bells'} size={14} color='back' size={20} />
+                                </TouchableOpacity>
+                                <TouchableOpacity
+                                    style={{
+                                        backgroundColor: '#f3f5f7',
+                                        width: 40,
+                                        height: 40,
+                                        justifyContent: 'center',
+                                        alignItems: 'center',
+                                        borderRadius: 20,
+                                        position: 'absolute',
+                                        right: 70,
+                                        top: 30
+                                    }}
+                                    onPress={() => { this.setState({ modalState: true }) }}>
+                                    <AntDesign name={'qrcode'} size={14} color='back' size={20} />
+                                </TouchableOpacity>
+                                <TouchableOpacity
+                                    style={{
+                                        backgroundColor: '#f3f5f7',
+                                        width: 40,
+                                        height: 40,
+                                        justifyContent: 'center',
+                                        alignItems: 'center',
+                                        borderRadius: 20,
+                                        position: 'absolute',
+                                        right: 20,
+                                        top: 30
+                                    }}
+                                    onPress={() => { this.props.navigation.navigate('Account') }}>
+                                    <AntDesign name={'user'} size={14} color='back' size={20} />
+                                </TouchableOpacity>
                             </View>
                             <View
                                 style={{
-                                    width: screenWidth - 40,
-                                    height: 120,
-                                    elevation: 10,
-                                    shadowColor: '#000',
-                                    shadowOffset: { width: 5, height: 5 },
-                                    shadowOpacity: 0.1,
-                                    shadowRadius: 5,
-                                    backgroundColor: 'white',
+                                    width: screenWidth,
                                     borderRadius: 5,
-                                    padding: 10,
-
+                                    alignItems: 'center',
                                 }}
                             >
-                                <Text style={{ margin: 10, fontWeight: 'bold', width: '100%' }}>Your Trips</Text>
-                                <Text style={{
-                                    fontSize: 36,
-                                    textAlign: 'right',
-                                    marginRight: 20,
-                                    marginBottom: 10,
-                                    fontWeight: '400'
-                                }}>125</Text>
                                 <View
                                     style={{
-                                        flexDirection: 'row',
-                                        flexWrap: 'wrap',
-                                        width: screenWidth,
-                                        display: 'none'
+                                        width: screenWidth - (((this.state.scrollPosition.y / 80) > 1 ? 0 : 1 - (this.state.scrollPosition.y / 80)) * 20),
+                                        height: 130 + (((this.state.scrollPosition.y / 80) > 1 ? 1 : (this.state.scrollPosition.y / 80)) * 10),
+                                        backgroundColor: '#ff4040',
+                                        marginBottom: -80,
+                                        borderTopLeftRadius: 5,
+                                        borderTopRightRadius: 5
                                     }}
                                 >
+                                </View>
+                                <View
+                                    style={{
+                                        width: screenWidth - 40,
+                                        height: 120,
+                                        elevation: 10,
+                                        shadowColor: '#000',
+                                        shadowOffset: { width: 5, height: 5 },
+                                        shadowOpacity: 0.1,
+                                        shadowRadius: 5,
+                                        backgroundColor: 'white',
+                                        borderRadius: 5,
+                                        padding: 10,
+
+                                    }}
+                                >
+                                    <Text style={{ margin: 10, fontWeight: 'bold', width: '100%' }}>Your Trips</Text>
+                                    <Text style={{
+                                        fontSize: 36,
+                                        textAlign: 'right',
+                                        marginRight: 20,
+                                        marginBottom: 10,
+                                        fontWeight: '400'
+                                    }}>{this.state.valetTrips.length} trips</Text>
                                     <View
                                         style={{
-                                            ...styles.buttonBlueLight,
-                                            width: (screenWidth - 80) / 3,
-                                            height: 40,
-                                            marginRight: 10
+                                            flexDirection: 'row',
+                                            flexWrap: 'wrap',
+                                            width: screenWidth,
+                                            display: 'none'
                                         }}
-                                    ><Text style={styles.buttonBlueText}>Send</Text></View>
-                                    <View
-                                        style={{
-                                            ...styles.buttonBlueLight,
-                                            width: (screenWidth - 80) / 3,
-                                            height: 40,
-                                            marginRight: 10
-                                        }}
-                                    ><Text style={styles.buttonBlueText}>Receive</Text></View>
-                                    <View
-                                        style={{
-                                            ...styles.buttonBlue,
-                                            width: (screenWidth - 80) / 3,
-                                            height: 40,
-                                        }}
-                                    ><Text style={styles.buttonBlueText}>Swap</Text></View>
+                                    >
+                                        <View
+                                            style={{
+                                                ...styles.buttonBlueLight,
+                                                width: (screenWidth - 80) / 3,
+                                                height: 40,
+                                                marginRight: 10
+                                            }}
+                                        ><Text style={styles.buttonBlueText}>Send</Text></View>
+                                        <View
+                                            style={{
+                                                ...styles.buttonBlueLight,
+                                                width: (screenWidth - 80) / 3,
+                                                height: 40,
+                                                marginRight: 10
+                                            }}
+                                        ><Text style={styles.buttonBlueText}>Receive</Text></View>
+                                        <View
+                                            style={{
+                                                ...styles.buttonBlue,
+                                                width: (screenWidth - 80) / 3,
+                                                height: 40,
+                                            }}
+                                        ><Text style={styles.buttonBlueText}>Swap</Text></View>
+                                    </View>
                                 </View>
                             </View>
-
-
                         </View>
-                    </View>
-                    <ScrollView nestedScrollEnabled={true} bounces={true}
-                        style={{
-                            height: 300,
-                            marginTop: this.state.scrollPosition.y > 95 ? 95 : this.state.scrollPosition.y
-                        }}>
-                        <View style={{ marginTop: 20, width: screenWidth, alignItems: 'center' }}>
-                            {this.state.valetTrips.map(info => {
-                                return <SettingButton
-                                    text={info.username}
-                                    description={info.dateStart}
-                                    onPress={() => {
-                                        info.dateEnd == null && this.setState({
-                                            tripId: info.tripId,
-                                            locationModal: true
-                                        }, () => {
-                                            this.getParkingAvailable()
+                    </RefreshControl>
+                    <View style={{ marginTop: 20, width: screenWidth, minHeight: screenHeight, alignItems: 'center' }}>
+                        {this.state.valetTrips.map(info => {
+                            return <SettingButton
+                                text={info.username}
+                                description={info.dateStart}
+                                onPress={() => {
+                                    this.setState({
+                                        tripId: info.tripId,
+                                        locationModal: true,
+                                        dateEnd: info.dateEnd
+                                    }, () => {
+                                        this.getParkingAvailable()
+                                        this.getEvents()
+                                        socket.emit('joinTrip', {
+                                            tripId: this.state.tripId
+                                        }, data => {
+                                            let { valetLocation, carLocation, keyLocation, userLocation } = data
+                                            data != 'FAIL' && this.setState({
+                                                valetLocation: valetLocation || {},
+                                                carLocation: carLocation || {},
+                                                keyLocation: keyLocation || {},
+                                                userLocation: userLocation || {}
+                                            }, () => {
+                                                this.getIsAsked()
+                                            })
                                         })
-                                    }}
-                                    icon={
-                                        info.dateEnd ?
-                                            <View style={{
-                                                backgroundColor: 'lightgreen',
-                                                height: 40, width: 40,
-                                                justifyContent: "center",
-                                                alignItems: 'center',
-                                                borderRadius: 20,
-                                            }}><Text style={{
-                                                color: 'white',
-                                                fontWeight: "bold"
-                                            }}>Done</Text></View> :
-                                            <View style={{
-                                                backgroundColor: '#FF4040',
-                                                height: 40, width: 40,
-                                                justifyContent: "center",
-                                                alignItems: 'center',
-                                                borderRadius: 20,
-                                            }}><Text style={{
-                                                color: 'white',
-                                                fontWeight: "bold"
-                                            }}>Live</Text></View>
-                                    }
-                                />
-                            })}
-                        </View>
-                    </ScrollView>
-                    <View style={{ height: screenHeight }}>
-                        <Text style={{ margin: 10, fontWeight: 'bold', width: '100%' }}></Text>
+                                    })
+                                }}
+                                icon={
+                                    info.dateEnd ?
+                                        <View style={{
+                                            backgroundColor: 'lightgreen',
+                                            height: 40, width: 40,
+                                            justifyContent: "center",
+                                            alignItems: 'center',
+                                            borderRadius: 20,
+                                        }}><Text style={{
+                                            color: 'white',
+                                            fontWeight: "bold"
+                                        }}>Done</Text></View> :
+                                        <View style={{
+                                            backgroundColor: '#FF4040',
+                                            height: 40, width: 40,
+                                            justifyContent: "center",
+                                            alignItems: 'center',
+                                            borderRadius: 20,
+                                        }}><Text style={{
+                                            color: 'white',
+                                            fontWeight: "bold"
+                                        }}>Live</Text></View>
+                                }
+                            />
+                        })}
                     </View>
-                    <QRScreen
-                        askForLocationPermissions={e => this.askForLocationPermissions(e)}
-                        createTrip={e => this.createTrip(e)}
-                        modalState={this.state.modalState}
-                        closeModal={() => { this.setState({ modalState: false }) }}
-                    />
-                    <Maps
-                        askForLocationPermissions={e => this.askForLocationPermissions(e)}
-                        createTrip={e => this.createTrip(e)}
-                        modalState={this.state.locationModal}
-                        closeModal={() => { this.setState({ locationModal: false }) }}
-                        availableParks={this.state.availableParks}
-                        setAsParked={e => this.setAsParked(e)}
-                    />
+
                 </ScrollView>
-            </View >
+                <QRScreen
+                    askForLocationPermissions={e => this.askForLocationPermissions(e)}
+                    createTrip={e => this.createTrip(e)}
+                    modalState={this.state.modalState}
+                    closeModal={() => { this.setState({ modalState: false }) }}
+                />
+                {this.state.locationModal && <Maps
+                    createTrip={e => this.createTrip(e)}
+                    modalState={this.state.locationModal}
+                    closeModal={() => { this.setState({ locationModal: false }) }}
+                    availableParks={this.state.availableParks}
+                    setAsParked={e => this.setAsParked(e)}
+                    location={this.state.location}
+                    isAsked={this.state.isAsked}
+                    carWithOwner={() => this.carWithOwner()}
+                    dateEnd={this.state.dateEnd}
+                    events={this.state.events}
+                />}
+            </View>
         );
     }
 }

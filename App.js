@@ -1,16 +1,12 @@
 import * as React from 'react';
 import Login from './screens/Login'
 import Home from './screens/Home'
-import Register from './screens/Register';
 import Account from './screens/Account';
 import { NavigationContainer } from '@react-navigation/native'
 import { createStackNavigator } from '@react-navigation/stack'
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
-import Maps from './screens/Maps';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { AntDesign } from '@expo/vector-icons'
-import { View } from 'react-native'
-import { styles } from './style/styles'
 const Stack = createStackNavigator()
 const Settings = createStackNavigator()
 const Tab = createBottomTabNavigator()
@@ -34,7 +30,7 @@ export default function App(){
             )
           }}
         />
-        <Tab.Screen
+        {/*<Tab.Screen
           name="Cars"
           component={Home}
           options={{
@@ -42,7 +38,7 @@ export default function App(){
               <AntDesign name={'car'} color={color} size={size} />
             )
           }}
-        />
+        />*/}
       </Tab.Navigator>
     )
   }
@@ -59,9 +55,7 @@ export default function App(){
             }}
           >
             <Stack.Screen name="Home" children={createAppNavigation} />
-            <Stack.Screen name="Maps" component={Maps} />
             <Stack.Screen name="Login" component={Login} />
-            <Stack.Screen name="Register" component={Register} />
             <Stack.Screen name="Account" component={createStackNavigation} />
           </Stack.Navigator>
         </NavigationContainer>
