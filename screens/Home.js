@@ -18,6 +18,7 @@ import Constants from 'expo-constants';
 import { API_HOST } from '../config'
 import SettingButton from '../components/settingButton'
 import QRScreen from './QRScreen'
+import EndTrip from './EndTrip'
 import Maps from './Maps'
 import io from 'socket.io-client'
 import * as Location from 'expo-location';
@@ -58,38 +59,56 @@ export default class Home extends React.Component {
                 if (!token || token == '') {
                     this.registerForPushNotificationsAsync().then(pushToken => {
                         SecureStore.setItemAsync('pushToken', pushToken)
-                        SecureStore.getItemAsync('authtoken').then(token => {
-                            fetch(`${API_HOST}/api/admin/pushToken`, {
-                                method: 'POST',
-                                headers,
-                                body: JSON.stringify({
-                                    pushToken,
-                                    valetId: this.state.valetId
-                                })
+                        fetch(`${API_HOST}/api/admin/pushToken`, {
+                            method: 'POST',
+                            headers,
+                            body: JSON.stringify({
+                                pushToken,
+                                valetId: this.state.valetId
                             })
                         })
                     })
                 }
             })
         })
+        this.mountSocket()
+    }
+    mountSocket() {
         socket = io(`${API_HOST}/`)
         socket.on('tripStarted', data => {
-            let { status } = data
+            let { status, tripId } = data
             if (status) {
                 this.setState({
                     modalState: false,
-                    locationModal: true
+                    locationModal: true,
+                    tripId,
+                    dateEnd: null
                 }, () => {
                     this.getValetTrips()
                     this.startReporting()
                     this.getIsAsked()
                     this.getEvents()
+                    this.getParkingAvailable()
                 })
             }
         })
-        this.setState({
-            refreshing: false
+        socket.on('update', () => {
+            this.getParkingAvailable()
+            this.getEvents()
+            this.getIsAsked()
+            this.getValetTrips()
         })
+        socket.on('carWithOwner', () => {
+            this.setState({
+                endModal: true
+            })
+        })
+    }
+    update() {
+        this.getParkingAvailable()
+        this.getEvents()
+        this.getIsAsked()
+        this.getValetTrips()
     }
     startReporting() {
         Location.startLocationUpdatesAsync('valetTrip', {
@@ -114,13 +133,6 @@ export default class Home extends React.Component {
                     location: locations[0].coords
                 })
             })
-        })
-    }
-    askForLocationPermissions = async () => {
-        let { status } = await Location.requestPermissionsAsync();
-        return (status == 'granted')
-        this.setState({
-            location: status == 'granted'
         })
     }
     getParkingAvailable() {
@@ -176,6 +188,10 @@ export default class Home extends React.Component {
         card[index].status = !card[index].status
         this.setState({ card })
     }
+    askForLocationPermissions = async () => {
+        let permission = await Location.requestPermissionsAsync()
+        return (permission == 'granted')
+    }
     verifyAuth(callback) {
         SecureStore.getItemAsync('authtoken').then((token) => {
             fetch(`${API_HOST}/api/validate/`, { headers })
@@ -229,14 +245,14 @@ export default class Home extends React.Component {
     }
     getEvents() {
         SecureStore.getItemAsync('authtoken').then(token => {
-            fetch(`${API_HOST}/api/admin/events/${this.state.tripId}`, {headers})
-            .then(res => res.json())
-            .then(data=>{
-                let {success, events} = data
-                this.setState({
-                    events: events || []
+            fetch(`${API_HOST}/api/admin/events/${this.state.tripId}`, { headers })
+                .then(res => res.json())
+                .then(data => {
+                    let { success, events } = data
+                    this.setState({
+                        events: events || []
+                    })
                 })
-            })
         })
     }
     registerForPushNotificationsAsync = async () => {
@@ -278,6 +294,27 @@ export default class Home extends React.Component {
     }
     carWithOwner() {
         socket.emit('carWithOwner', {
+            tripId: this.state.tripId
+        }, data => {
+            if (data == "OK") {
+                this.getValetTrips();
+                this.setState({
+                    locationModal: false
+                })
+            } else {
+                Alert.alert('Error!', 'User needs to aks for the car first', [
+                    {
+                        text: 'Ok',
+                        onPress: () => {
+                        },
+                        style: 'cancel',
+                    },
+                ])
+            }
+        })
+    }
+    endTrip() {
+        socket.emit('confirmCarWithOwner', {
             tripId: this.state.tripId
         }, data => {
             if (data == "OK") {
@@ -401,6 +438,18 @@ export default class Home extends React.Component {
 
                                     }}
                                 >
+                                    <TouchableOpacity
+                                        onPress={() => { this.update(); }}
+                                        style={{
+                                            margin: 10,
+                                            position: 'absolute',
+                                            top: 10,
+                                            right: 20,
+                                            zIndex: 2
+                                        }}
+                                    >
+                                        <Text><AntDesign name='reload1' size={20} color='#a1a1a1' /></Text>
+                                    </TouchableOpacity>
                                     <Text style={{ margin: 10, fontWeight: 'bold', width: '100%' }}>Your Trips</Text>
                                     <Text style={{
                                         fontSize: 36,
@@ -501,6 +550,13 @@ export default class Home extends React.Component {
                     </View>
 
                 </ScrollView>
+                <EndTrip
+                    modalState={this.state.endModal}
+                    closeModal={() => { this.setState({ endModal: false }) }}
+                    userId={this.state.userId}
+                    tripId={this.state.tripId}
+                    endTrip={() => this.endTrip()}
+                />
                 <QRScreen
                     askForLocationPermissions={e => this.askForLocationPermissions(e)}
                     createTrip={e => this.createTrip(e)}

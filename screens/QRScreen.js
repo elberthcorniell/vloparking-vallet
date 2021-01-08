@@ -156,7 +156,7 @@ export default class QRScreen extends React.Component {
                   })
                   if (success)
                     this.props.createTrip(qrData)
-                  this.props.askForLocationPermissions().then(console.log)
+                  this.props.askForLocationPermissions()
                 })
             })
           }) : ''
@@ -189,26 +189,6 @@ export default class QRScreen extends React.Component {
                   style={styles.grayTextBold}
                 >{JSON.parse(this.state.qrData || '{}').tripId}</Text>
               </View>
-            </View>
-            <View style={{
-              flexDirection: 'row',
-              flexWrap: 'nowrap',
-              position: 'absolute',
-              bottom: 20
-            }}>
-              <View
-                style={{
-                  ...styles.buttonBlue,
-                  width: (screenWidth - 60) * 0.25,
-                  marginRight: 10
-                }}
-              ><Text style={styles.buttonBlueText}><AntDesign name="copy1" size={16} color="white" /></Text></View>
-              <View
-                style={{
-                  ...styles.buttonBlueLight,
-                  width: (screenWidth - 60) * 0.75,
-                }}
-              ><Text style={styles.buttonBlueText}><AntDesign name="sharealt" size={16} color="white" /> Share</Text></View>
             </View>
           </View>
         )

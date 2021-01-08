@@ -135,7 +135,7 @@ export default class Login extends React.Component {
                             </View>
                         </TouchableOpacity>
                         <View style={{padding: 20, textAlign: 'center'}}>
-                            <Text>This is the Valet App i you are a user please download Client App</Text>
+                            <Text>This is the Valet App, if you are a client please download Client App</Text>
                             </View>
                     </View>
                 </View>

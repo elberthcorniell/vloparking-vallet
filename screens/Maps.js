@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { Text, View, StyleSheet, Dimensions, TouchableOpacity, StatusBar, Modal } from 'react-native';
+import { Text, View, Image, Dimensions, TouchableOpacity, StatusBar, Modal } from 'react-native';
 import { styles } from '../style/styles'
 import { AntDesign } from '@expo/vector-icons'
 import * as Permissions from 'expo-permissions'
@@ -96,55 +96,78 @@ export default class Maps extends React.Component {
                                             }}
                                             style={styles.mapContainer} />}
                                     </View>}
-                                
+
                                 {(this.props.dateEnd == null) && <View style={{
                                     width: screenWidth
                                 }}>
                                     <Text style={styles.blueTitle}>Free Parking</Text>
-                                    {this.props.availableParks.length == 0 ?
-                                        <Text>No parking lots available</Text>
-                                        :
-                                        this.props.dateEnd == null && this.props.availableParks.map(park => {
-                                            return <TouchableOpacity
-                                                onPress={() => this.props.setAsParked(park.parkId)}
-                                            >
-                                                <View style={{
-                                                    height: screenHeight * 0.25,
-                                                    width: screenWidth * 0.28,
-                                                    margin: screenWidth * 0.025,
-                                                    borderRadius: 5,
-                                                    backgroundColor: '#f3f5f7',
-                                                    elevation: 10,
-                                                    justifyContent: 'center',
-                                                    alignItems: 'center'
-                                                }}>
-                                                    <Text style={{ fontSize: 28 }}>{park.parkNum}</Text>
-                                                </View>
-                                            </TouchableOpacity>
-                                        })}
+                                    <View style={{
+                                        width: screenWidth,
+                                        flexDirection: 'row'
+                                    }}>
+                                        {this.props.availableParks.length == 0 ?
+                                            <View style={{
+                                                height: screenHeight,
+                                                width: screenWidth,
+                                                alignItems: 'center'
+                                            }}>
+                                                <Image style={{ width: screenWidth * 0.6, height: screenWidth * 0.6, marginTop: 30 }} source={require('../assets/notfound.png')} />
+                                                <Text>We didn't find free parking lots</Text>
+                                            </View>
+                                            :
+                                            this.props.dateEnd == null && this.props.availableParks.map(park => {
+                                                return <TouchableOpacity
+                                                    style={{
+                                                        width: screenWidth * 0.28,
+                                                        margin: screenWidth * 0.025,
+                                                    }}
+                                                    onPress={() => this.props.setAsParked(park.parkId)}
+                                                >
+                                                    <View style={{
+                                                        height: screenHeight * 0.25,
+                                                        borderRadius: 5,
+                                                        backgroundColor: '#f3f5f7',
+                                                        elevation: 10,
+                                                        justifyContent: 'center',
+                                                        alignItems: 'center'
+                                                    }}>
+                                                        <Text style={{ fontSize: 28 }}>{park.parkNum}</Text>
+                                                    </View>
+                                                </TouchableOpacity>
+                                            })}
+                                    </View>
                                 </View>}
                                 <View style={{ padding: 10, width: screenWidth }}>
                                     <Text style={styles.blueTitle}>Trip Info</Text>
+                                    <ScrollView>
                                     {this.props.events.map(info =>
                                         <SettingButton style={{
-                                            backgroundColor: info.type == 0 ? 'yellow' : info.type == null ? 'red' : '#f3f5f7'
+                                            backgroundColor: info.type == 0 ? 'orange' : info.type == null ? 'red' : '#f3f5f7'
                                         }}
                                             text={info.description}
                                             description={info.date}
-                                            onPress={() => { }}
+                                            descriptionStyle={{
+                                                color: info.type == 1 ? '#a1a1a1' : 'white'
+                                            }}
                                         />)}
+                                        </ScrollView>
                                 </View>
                             </ScrollView>
-                        </View>
-                            {this.props.isAsked && this.props.dateEnd == null && <TouchableOpacity
+                        {this.props.isAsked && (this.props.dateEnd == null) &&
+                            <TouchableOpacity
+                                style={{
+                                    position: 'absolute',
+                                    bottom: screenHeight * 0.05,
+                                    margin: 20
+                                }}
                                 onPress={() => {
                                     this.props.carWithOwner()
-                                }}
-                            >
-                                <View style={{ ...styles.buttonBlue, margin: 20, marginTop: -20, zIndex: 2000  }}>
-                                    <Text style={styles.buttonBlueText}>Vehiculo entregado</Text>
+                                }}>
+                                <View style={{ ...styles.buttonBlue,  }}>
+                                    <Text style={styles.buttonBlueText}>Trip Done</Text>
                                 </View>
                             </TouchableOpacity>}
+                        </View>
                     </View>
                 </View>
             </Modal>
